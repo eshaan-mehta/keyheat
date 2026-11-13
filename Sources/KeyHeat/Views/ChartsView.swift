@@ -1,31 +1,38 @@
 import Charts
 import SwiftUI
 
-// MARK: - Top keys
+// MARK: - Ranked keys
 
-/// Ranked bars in a single accent.
-struct TopKeysChart: View {
+/// Ranked bars in a single accent. Shows `visibleRows` at a time and scrolls
+/// for the rest, so the list can hold every key without dominating the page.
+/// Bar lengths follow the same scale as the heatmap, so that the least
+/// pressed keys still get a readable bar next to the most pressed ones.
+struct RankedKeysChart: View {
     let keys: [KeyCount]
     let total: Int
-    let maxCount: Int
     let scale: HeatScale
+    var visibleRows = 15
 
     var body: some View {
         if keys.isEmpty {
             EmptyNote(text: "No presses in this range yet.")
         } else {
-            HBarList(
-                rows: keys.map { k in
-                    HBarRow(id: k.info.name,
-                            label: k.info.name,
-                            value: k.count,
-                            color: Palette.accentBlue,
-                            valueLabel: k.count.formatted(),
-                            hoverLabel: "\(k.count.formatted()) · \(Fmt.percent(total > 0 ? Double(k.count) / Double(total) : 0))")
-                },
-                maxValue: keys.map(\.count).max() ?? 1,
-                labelWidth: 96
-            )
+            let maxCount = keys.map(\.count).max() ?? 1
+            ScrollView(.vertical) {
+                HBarList(
+                    rows: keys.map { k in
+                        HBarRow(id: k.info.name,
+                                label: k.info.name,
+                                value: k.count,
+                                fraction: scale.normalize(k.count, max: maxCount),
+                                color: Palette.accentBlue,
+                                valueLabel: k.count.formatted(),
+                                hoverLabel: "\(k.count.formatted()) · \(Fmt.percent(total > 0 ? Double(k.count) / Double(total) : 0))")
+                    },
+                    labelWidth: 112   // fits "Forward Delete" and "Right Command"
+                )
+            }
+            .frame(height: HBarList.height(rows: min(keys.count, visibleRows)))
         }
     }
 }

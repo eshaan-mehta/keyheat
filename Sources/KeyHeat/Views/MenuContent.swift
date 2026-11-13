@@ -13,7 +13,7 @@ struct MenuContent: View {
     }
 
     var body: some View {
-        Text("Today: \(state.stats.todayTotal.formatted()) presses")
+        Text("Today: \(state.stats.todayEveryKey.formatted()) presses")
         Text(statusLine)
         Divider()
         Button("Open Dashboard") { state.showDashboard() }

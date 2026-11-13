@@ -106,16 +106,23 @@ final class DashboardWindowController {
     }
 
     /// Dev hook: KEYHEAT_SNAPSHOT=/path/out.png renders the dashboard to a PNG
-    /// and quits. KEYHEAT_SNAPSHOT_SCROLL scrolls first.
+    /// and quits. KEYHEAT_SNAPSHOT_SCROLL scrolls the page first;
+    /// KEYHEAT_SNAPSHOT_INNER_SCROLL scrolls the first nested list.
     private func installSnapshotHook(on w: NSWindow) {
         let env = ProcessInfo.processInfo.environment
         guard let path = env["KEYHEAT_SNAPSHOT"] else { return }
         let height = Double(env["KEYHEAT_SNAPSHOT_HEIGHT"] ?? "") ?? 2300
         w.setFrame(NSRect(x: 0, y: 0, width: 1180, height: height), display: true)
         let scroll = Double(env["KEYHEAT_SNAPSHOT_SCROLL"] ?? "") ?? 0
+        let inner = Double(env["KEYHEAT_SNAPSHOT_INNER_SCROLL"] ?? "") ?? 0
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-            if scroll > 0, let sv = Self.findScrollView(in: w.contentView) {
+            let scrollViews = Self.findScrollViews(in: w.contentView)
+            if scroll > 0, let sv = scrollViews.first {
                 sv.contentView.scroll(to: NSPoint(x: 0, y: scroll))
+                sv.reflectScrolledClipView(sv.contentView)
+            }
+            if inner > 0, let sv = scrollViews.dropFirst().first {
+                sv.contentView.scroll(to: NSPoint(x: 0, y: inner))
                 sv.reflectScrolledClipView(sv.contentView)
             }
         }
@@ -131,12 +138,12 @@ final class DashboardWindowController {
         }
     }
 
-    private static func findScrollView(in view: NSView?) -> NSScrollView? {
-        guard let view else { return nil }
-        if let sv = view as? NSScrollView { return sv }
-        for sub in view.subviews {
-            if let found = findScrollView(in: sub) { return found }
-        }
-        return nil
+    /// Every scroll view under `view`, outermost first.
+    private static func findScrollViews(in view: NSView?) -> [NSScrollView] {
+        guard let view else { return [] }
+        var found: [NSScrollView] = []
+        if let sv = view as? NSScrollView { found.append(sv) }
+        for sub in view.subviews { found += findScrollViews(in: sub) }
+        return found
     }
 }

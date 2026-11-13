@@ -52,4 +52,13 @@ enum KeyboardLayout {
     }()
 
     static let codes: Set<Int> = Set(keys.map(\.code))
+
+    /// Smallest rectangle around `keys`, in key units. The whole board if empty.
+    static func bounds(of keys: [LayoutKey]) -> CGRect {
+        guard let minX = keys.map(\.x).min(), let maxX = keys.map({ $0.x + $0.w }).max(),
+              let minY = keys.map(\.y).min(), let maxY = keys.map({ $0.y + 1 }).max() else {
+            return CGRect(x: 0, y: 0, width: width, height: height)
+        }
+        return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+    }
 }

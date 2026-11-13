@@ -6,8 +6,11 @@ use most as a heatmap over a Mac keyboard.
 It runs in the background and lives in the menu bar. Open the dashboard to see:
 
 - A heatmap overlay on the keyboard, blue for rarely used keys through to red for
-  the hottest, over today, the last 7 or 30 days, or all time.
-- Your most pressed keys, presses per day, and left vs right hand balance.
+  the hottest, over today, the last 7 or 30 days, or all time. Switch the
+  board to Dvorak to see where the same typing would land there, or narrow
+  the whole dashboard to the letters and , . / ; ' to see how often you use
+  each one.
+- Your most and least pressed keys, presses per day, and left vs right hand balance.
 - Modifier keys too: ⌘ ⌥ ⌃ ⇧ fn and caps lock, left and right counted
   separately.
 

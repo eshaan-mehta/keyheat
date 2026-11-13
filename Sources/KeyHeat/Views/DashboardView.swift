@@ -25,11 +25,11 @@ struct DashboardView: View {
                     .padding(.bottom, 36)
                 HStack(alignment: .top, spacing: 56) {
                     VStack(alignment: .leading, spacing: 20) {
-                        SectionHeader(title: "Most pressed", subtitle: "Top 15 keys in this range. Hover for share.")
-                        TopKeysChart(keys: Array(state.stats.perKey.prefix(15)),
-                                     total: state.stats.total,
-                                     maxCount: state.stats.maxCount,
-                                     scale: state.scale)
+                        rankedKeysHeader
+                        RankedKeysChart(keys: rankedKeys, total: state.stats.total, scale: state.scale,
+                                        visibleRows: visibleRankedRows)
+                            // Start from the top again when the order or filter changes.
+                            .id("\(state.keyRanking.rawValue)-\(state.showSpecialKeys)-\(state.lettersAndPunctuation)")
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -89,6 +89,16 @@ struct DashboardView: View {
             TextSegments(options: TimeRange.allCases.map { ($0, $0.title) }, selection: $state.range, size: 14)
             Spacer()
             TextSegments(options: HeatScale.allCases.map { ($0, $0.title) }, selection: $state.scale, size: 12)
+            TextSegments(options: TypingLayout.allCases.map { ($0, $0.title) }, selection: $state.typingLayout, size: 12)
+                .help("Draw your typing on a QWERTY or Dvorak board. Presses are read as QWERTY, and each character's count moves to where the layout puts it.")
+                .padding(.leading, 28)
+            Toggle("Letters & punctuation", isOn: $state.lettersAndPunctuation)
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+                .font(.system(size: 12))
+                .foregroundStyle(Palette.muted)
+                .padding(.leading, 8)
+                .help("Show only the letters and , . / ; ' keys. Totals, shares and charts then count those keys alone.")
             Toggle("Counts", isOn: $state.showCounts)
                 .toggleStyle(.switch)
                 .controlSize(.mini)
@@ -119,16 +129,18 @@ struct DashboardView: View {
                  label: "per active hour")
             Stat(value: "\(s.uniqueKeys)",
                  label: "keys used",
-                 detail: "of \(KeyboardLayout.keys.count) on the board")
+                 detail: "of \(s.boardKeys.count) on the board")
         }
     }
 
     private var heatmap: some View {
         VStack(alignment: .leading, spacing: 20) {
-            HeatmapView(stats: state.stats, scale: state.scale, showCounts: state.showCounts, hovered: $hoveredKey)
+            HeatmapView(stats: state.stats, scale: state.scale,
+                        showCounts: state.showCounts, hovered: $hoveredKey)
                 .frame(maxWidth: .infinity)
             HStack {
-                KeyDetailStrip(hovered: hoveredKey, stats: state.stats)
+                KeyDetailStrip(hovered: hoveredKey, stats: state.stats,
+                               lettersAndPunctuation: state.lettersAndPunctuation)
                 HeatLegend(maxCount: state.stats.maxCount, scale: state.scale)
             }
         }
@@ -144,6 +156,46 @@ struct DashboardView: View {
         }
         .font(.system(size: 11))
         .foregroundStyle(Palette.muted)
+    }
+
+    private let visibleRankedRows = 15
+
+    private var rankedKeys: [KeyCount] {
+        state.stats.ranked(state.keyRanking, includeSpecial: state.showSpecialKeys)
+    }
+
+    /// The section title doubles as the Most / Least toggle, in the same
+    /// text-only style as the range and scale controls.
+    private var rankedKeysHeader: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(alignment: .firstTextBaseline) {
+                TextSegments(options: KeyRanking.allCases.map { ($0, $0.title) }, selection: $state.keyRanking, size: 15)
+                Spacer()
+                // None of these is a special key, so the filter has nothing to do.
+                if !state.lettersAndPunctuation {
+                    Toggle("Special keys", isOn: $state.showSpecialKeys)
+                        .toggleStyle(.switch)
+                        .controlSize(.mini)
+                        .font(.system(size: 12))
+                        .foregroundStyle(Palette.muted)
+                        .help("Function keys, Insert, Forward Delete, Home, End, Page Up and Page Down")
+                }
+            }
+            Text(rankedKeysSubtitle).font(.system(size: 12)).foregroundStyle(Palette.muted)
+        }
+    }
+
+    private var rankedKeysSubtitle: String {
+        let keys = rankedKeys
+        guard !keys.isEmpty else { return "Ranked by presses in this range." }
+        var parts = ["\(keys.count) key\(keys.count == 1 ? "" : "s"), \(state.keyRanking == .most ? "most" : "least") pressed first."]
+        if state.keyRanking == .least {
+            let unpressed = state.stats.unpressedOnBoard(includeSpecial: state.showSpecialKeys)
+            if unpressed > 0 { parts.append("\(unpressed) \(unpressed == 1 ? "was" : "were") never pressed.") }
+        }
+        if keys.count > visibleRankedRows { parts.append("Scroll for more.") }
+        parts.append("Hover for share.")
+        return parts.joined(separator: " ")
     }
 
     private var timelineTitle: String {

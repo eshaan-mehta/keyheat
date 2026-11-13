@@ -48,6 +48,19 @@ enum HeatScale: String, CaseIterable, Identifiable {
     }
 }
 
+/// Which end of the per-key ranking the "pressed keys" chart shows.
+enum KeyRanking: String, CaseIterable, Identifiable {
+    case most, least
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .most: return "Most pressed"
+        case .least: return "Least pressed"
+        }
+    }
+}
+
 struct KeyCount: Identifiable {
     let info: KeyInfo
     let count: Int
@@ -70,6 +83,7 @@ struct PeriodCount: Identifiable {
 struct Stats {
     var total = 0
     var todayTotal = 0                  // always today, regardless of range
+    var todayEveryKey = 0               // today across every key, even when filtered
     var allTimeTotal = 0                // everything ever recorded, regardless of range
     var perKey: [KeyCount] = []         // sorted by count, descending
     var countByCode: [Int: Int] = [:]
@@ -83,6 +97,11 @@ struct Stats {
     var rightHand = 0
     var activeHours = 0
     var uniqueKeys = 0
+    /// Layout the counts were placed in. `countByCode` and `perKey` are keyed by
+    /// position on this layout's board.
+    var layout = TypingLayout.qwerty
+    /// Keys drawn on the board: all of them, or just letters and punctuation.
+    var boardKeys = KeyboardLayout.keys
     var firstDate: Date?
 
     var peakHour: HourCount? {
@@ -90,6 +109,27 @@ struct Stats {
         return m
     }
     var topKey: KeyCount? { perKey.first }
+
+    /// Every pressed key, ordered from the chosen end of the ranking. Ties are
+    /// broken by name so the order is stable between refreshes.
+    func ranked(_ ranking: KeyRanking, includeSpecial: Bool) -> [KeyCount] {
+        let keys = includeSpecial ? perKey : perKey.filter { !$0.info.isSpecial }
+        switch ranking {
+        case .most:
+            return keys
+        case .least:
+            return keys.sorted { a, b in
+                a.count != b.count ? a.count < b.count : a.info.name < b.info.name
+            }
+        }
+    }
+
+    /// Keys drawn on the board with no presses in this range.
+    func unpressedOnBoard(includeSpecial: Bool) -> Int {
+        boardKeys.filter { key in
+            (countByCode[key.code] ?? 0) == 0 && (includeSpecial || !KeyCodes.info(key.code).isSpecial)
+        }.count
+    }
 
     func rank(of code: Int) -> Int? {
         perKey.firstIndex { $0.info.code == code }.map { $0 + 1 }
@@ -99,9 +139,16 @@ struct Stats {
         total > 0 ? Double(count) / Double(total) : 0
     }
 
-    static func compute(buckets: KeyStore.Buckets, range: TimeRange, now: Date = Date()) -> Stats {
+    /// Recorded key codes are read as QWERTY characters, and each character's
+    /// count is placed where `layout` puts it, so names, positions and hands
+    /// all follow the layout.
+    /// `lettersAndPunctuation` drops every other key before counting, so
+    /// totals, shares, the timeline and hand balance describe those keys alone.
+    static func compute(buckets: KeyStore.Buckets, range: TimeRange, layout: TypingLayout,
+                        lettersAndPunctuation: Bool, now: Date = Date()) -> Stats {
         let cal = Calendar.current
         var s = Stats()
+        s.layout = layout
         let startOfToday = cal.startOfDay(for: now)
         let rangeStart = range.start(now: now)
 
@@ -122,12 +169,34 @@ struct Stats {
         var minHour = Int.max
         var minHourAll = Int.max
 
-        for (hour, keys) in buckets {
+        // Letters plus the punctuation typed among them. Which physical keys
+        // those are depends on the layout.
+        let punctuation: Set<String> = [",", ".", "/", ";", "'"]
+        let textKeys = Set(KeyCodes.table.keys.filter { code in
+            let info = KeyCodes.info(code, layout: layout)
+            return info.category == .letter || (info.category == .symbol && punctuation.contains(info.legend))
+        })
+        if lettersAndPunctuation { s.boardKeys = KeyboardLayout.keys.filter { textKeys.contains($0.code) } }
+
+        for (hour, recorded) in buckets {
+            let bucketEnd = TimeInterval(hour + 1) * 3600
+            let isToday = bucketEnd > startOfToday.timeIntervalSince1970
+            if isToday { s.todayEveryKey += recorded.values.reduce(0, +) }
+            // Key code → position in the layout, dropping keys outside the filter.
+            var keys = recorded
+            if layout != .qwerty || lettersAndPunctuation {
+                keys = [:]
+                for (code, n) in recorded {
+                    let position = KeyCodes.position(of: code, in: layout)
+                    if !lettersAndPunctuation || textKeys.contains(position) { keys[position, default: 0] += n }
+                }
+            }
+            if keys.isEmpty { continue }
+
             let bucketTotal = keys.values.reduce(0, +)
             s.allTimeTotal += bucketTotal
             minHourAll = min(minHourAll, hour)
-            let bucketEnd = TimeInterval(hour + 1) * 3600
-            if bucketEnd > startOfToday.timeIntervalSince1970 { s.todayTotal += bucketTotal }
+            if isToday { s.todayTotal += bucketTotal }
             if timelineWindowStart.map({ bucketEnd > $0.timeIntervalSince1970 }) ?? true {
                 timelineBuckets[hour] = bucketTotal
             }
@@ -151,7 +220,7 @@ struct Stats {
         }
 
         s.perKey = counts
-            .map { KeyCount(info: KeyCodes.info($0.key), count: $0.value) }
+            .map { KeyCount(info: KeyCodes.info($0.key, layout: layout), count: $0.value) }
             .sorted { a, b in
                 a.count != b.count ? a.count > b.count : a.info.name < b.info.name
             }

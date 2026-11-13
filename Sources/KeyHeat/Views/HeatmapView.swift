@@ -7,14 +7,18 @@ struct HeatmapView: View {
     @Binding var hovered: Int?
 
     var body: some View {
+        let keys = stats.boardKeys
+        let box = KeyboardLayout.bounds(of: keys)
         GeometryReader { geo in
-            let unit = min(geo.size.width / KeyboardLayout.width, geo.size.height / KeyboardLayout.height)
-            let originX = (geo.size.width - unit * KeyboardLayout.width) / 2
-            let originY = (geo.size.height - unit * KeyboardLayout.height) / 2
+            // Keys are sized against the full board's width, so showing part
+            // of the board crops it instead of zooming in.
+            let unit = min(geo.size.width / KeyboardLayout.width, geo.size.height / box.height)
+            let originX = (geo.size.width - unit * box.width) / 2 - unit * box.minX
+            let originY = (geo.size.height - unit * box.height) / 2 - unit * box.minY
             ZStack(alignment: .topLeading) {
-                ForEach(KeyboardLayout.keys) { key in
+                ForEach(keys) { key in
                     let count = stats.countByCode[key.code] ?? 0
-                    KeyCapView(info: KeyCodes.info(key.code),
+                    KeyCapView(info: KeyCodes.info(key.code, layout: stats.layout),
                                count: count,
                                t: scale.normalize(count, max: stats.maxCount),
                                unit: unit,
@@ -29,7 +33,7 @@ struct HeatmapView: View {
             }
             .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
         }
-        .aspectRatio(KeyboardLayout.width / KeyboardLayout.height, contentMode: .fit)
+        .aspectRatio(KeyboardLayout.width / box.height, contentMode: .fit)
     }
 }
 
@@ -83,15 +87,16 @@ private struct KeyCapView: View {
 struct KeyDetailStrip: View {
     let hovered: Int?
     let stats: Stats
+    let lettersAndPunctuation: Bool
 
     var body: some View {
         HStack(spacing: 14) {
             if let code = hovered {
-                let info = KeyCodes.info(code)
+                let info = KeyCodes.info(code, layout: stats.layout)
                 let count = stats.countByCode[code] ?? 0
                 Text(info.name).font(.system(size: 13, weight: .semibold)).foregroundStyle(Palette.ink)
                 Text("\(count.formatted()) presses").foregroundStyle(Palette.inkSecondary)
-                Text(Fmt.percent(stats.share(count)) + " of all").foregroundStyle(Palette.inkSecondary)
+                Text(Fmt.percent(stats.share(count)) + (lettersAndPunctuation ? " of letters & punctuation" : " of all")).foregroundStyle(Palette.inkSecondary)
                 if let r = stats.rank(of: code) {
                     Text("#\(r) of \(stats.uniqueKeys)").foregroundStyle(Palette.inkSecondary)
                 }

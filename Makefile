@@ -3,6 +3,16 @@ BUNDLE_ID := com.eshaan.keyheat
 BIN       := .build/release/$(APP)
 OUT       := build/$(APP).app
 
+# Command Line Tools 27.0 default to the macOS 27 SDK, where SwiftUI's @State is
+# a macro. The CLT do not ship the SwiftUIMacros plugin, so that SDK cannot build
+# this app ("plugin for module 'SwiftUIMacros' not found"). Use the 26.5 SDK
+# while it is still installed; SDKROOT set in the environment wins.
+SDK26     := /Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk
+ifneq ($(wildcard $(SDK26)),)
+SDKROOT   ?= $(SDK26)
+export SDKROOT
+endif
+
 .PHONY: all build bundle run install clean
 
 all: bundle

@@ -34,15 +34,44 @@ struct KeyInfo {
     let sublegend: String?
     let category: KeyCategory
     let hand: Hand
+
+    /// Function keys and the nav cluster (Insert, Forward Delete, Home, End,
+    /// Page Up, Page Down). Escape and the arrows are not counted as special.
+    var isSpecial: Bool {
+        (category == .function && code != 0x35) || KeyInfo.navCluster.contains(code)
+    }
+
+    private static let navCluster: Set<Int> = [0x72, 0x75, 0x73, 0x77, 0x74, 0x79]
+}
+
+/// The layout the board is drawn in. Key codes name physical positions
+/// (kVK_ANSI_E is the key right of W whatever the input source) and are read
+/// as QWERTY typing, so each code stands for a character. Drawing in another
+/// layout moves each character's count to where that layout puts it.
+enum TypingLayout: String, CaseIterable {
+    case qwerty, dvorak
+
+    var title: String {
+        switch self {
+        case .qwerty: return "QWERTY"
+        case .dvorak: return "Dvorak"
+        }
+    }
 }
 
 /// macOS virtual key codes (kVK_*) → key metadata.
 enum KeyCodes {
-    static func info(_ code: Int) -> KeyInfo {
+    static func info(_ code: Int, layout: TypingLayout = .qwerty) -> KeyInfo {
+        if layout == .dvorak, let k = dvorak[code] { return k }
         if let k = table[code] { return k }
         return KeyInfo(code: code, name: String(format: "Key 0x%02X", code),
                        legend: String(format: "%02X", code), sublegend: nil,
                        category: .other, hand: .either)
+    }
+
+    /// Where the character that `code` types on QWERTY sits in `layout`.
+    static func position(of code: Int, in layout: TypingLayout) -> Int {
+        layout == .dvorak ? dvorakPosition[code] ?? code : code
     }
 
     static let table: [Int: KeyInfo] = {
@@ -154,4 +183,39 @@ enum KeyCodes {
         add(0x68, "Kana", "かな", nil, .other, .right)
         return t
     }()
+
+    /// US Dvorak as physical position → the QWERTY key with the same
+    /// character, both as key codes. Dvorak's "E" sits where QWERTY has D,
+    /// so kVK_ANSI_D → kVK_ANSI_E.
+    private static let dvorakSource: [Int: Int] = {
+        // Each QWERTY row next to what the same keys type in Dvorak.
+        let rows = [("`1234567890-=", "`1234567890[]"),
+                    ("qwertyuiop[]\\", "',.pyfgcrl/=\\"),
+                    ("asdfghjkl;'", "aoeuidhtns-"),
+                    ("zxcvbnm,./", ";qjkxbmwvz")]
+        let byLegend = Dictionary(
+            table.values
+                .filter { [.letter, .digit, .symbol].contains($0.category) }
+                .map { ($0.legend.lowercased(), $0.code) },
+            uniquingKeysWith: { first, _ in first })
+        var t: [Int: Int] = [:]
+        for (qwerty, typed) in rows {
+            for (q, d) in zip(qwerty, typed) {
+                if let position = byLegend[String(q)], let source = byLegend[String(d)] { t[position] = source }
+            }
+        }
+        return t
+    }()
+
+    /// QWERTY key → the position Dvorak puts its character at.
+    private static let dvorakPosition = Dictionary(dvorakSource.map { ($0.value, $0.key) },
+                                                   uniquingKeysWith: { first, _ in first })
+
+    /// Dvorak keys: each position keeps its code and hand and takes the name,
+    /// legends and category of the character Dvorak puts there.
+    private static let dvorak: [Int: KeyInfo] = dvorakSource.reduce(into: [:]) { t, entry in
+        guard let key = table[entry.key], let char = table[entry.value] else { return }
+        t[key.code] = KeyInfo(code: key.code, name: char.name, legend: char.legend,
+                              sublegend: char.sublegend, category: char.category, hand: key.hand)
+    }
 }

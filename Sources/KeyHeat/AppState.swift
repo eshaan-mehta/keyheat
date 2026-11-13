@@ -13,6 +13,17 @@ final class AppState: ObservableObject {
     @Published var range: TimeRange = .today { didSet { refresh(force: true) } }
     @Published var scale: HeatScale = .sqrt
     @Published var showCounts = false
+    /// Remembered across launches.
+    @Published var typingLayout = AppState.initialTypingLayout {
+        didSet {
+            UserDefaults.standard.set(typingLayout.rawValue, forKey: AppState.typingLayoutKey)
+            refresh(force: true)
+        }
+    }
+    /// Restrict the board and every figure to letters and , . / ; '.
+    @Published var lettersAndPunctuation = false { didSet { refresh(force: true) } }
+    @Published var keyRanking: KeyRanking = .most
+    @Published var showSpecialKeys = true
     @Published private(set) var tracking: TrackingState = .noPermission
     @Published private(set) var launchAtLogin = SMAppService.mainApp.status == .enabled
 
@@ -24,6 +35,8 @@ final class AppState: ObservableObject {
 
     private var lastGeneration = -1
     private var computing = false
+    /// A forced refresh arrived while computing; run it once the compute lands.
+    private var refreshPending = false
     private var uiTimer: Timer?
     private var retryTimer: Timer?
 
@@ -45,6 +58,9 @@ final class AppState: ObservableObject {
             MainActor.assumeIsolated { self?.refresh() }
         }
         if let r = env["KEYHEAT_RANGE"].flatMap(TimeRange.init(rawValue:)) { range = r }
+        if let k = env["KEYHEAT_RANK"].flatMap(KeyRanking.init(rawValue:)) { keyRanking = k }
+        if env["KEYHEAT_HIDE_SPECIAL"] != nil { showSpecialKeys = false }
+        if env["KEYHEAT_LETTERS_AND_PUNCTUATION"] != nil { lettersAndPunctuation = true }
         refresh(force: true)
         if env["KEYHEAT_NO_TAP"] != nil {
             // Dev/demo hook: never create the event tap or ask for permission.
@@ -52,6 +68,16 @@ final class AppState: ObservableObject {
         } else {
             startTracking()
         }
+    }
+
+    private static let typingLayoutKey = "typingLayout"
+
+    /// The saved layout. KEYHEAT_LAYOUT overrides it for snapshots without
+    /// being saved; assigning in init would run `didSet` and save it.
+    private static var initialTypingLayout: TypingLayout {
+        let raw = ProcessInfo.processInfo.environment["KEYHEAT_LAYOUT"]
+            ?? UserDefaults.standard.string(forKey: typingLayoutKey)
+        return raw.flatMap(TypingLayout.init(rawValue:)) ?? .qwerty
     }
 
     static var tapDisabledByEnvironment: Bool {
@@ -110,16 +136,29 @@ final class AppState: ObservableObject {
 
     func refresh(force: Bool = false) {
         let snap = store.snapshot()
-        guard force || snap.generation != lastGeneration, !computing else { return }
+        guard !computing else {
+            // Dropping this would leave a new range or layout unapplied until
+            // the next key press.
+            if force { refreshPending = true }
+            return
+        }
+        guard force || snap.generation != lastGeneration else { return }
         lastGeneration = snap.generation
         computing = true
         let range = self.range
-        DispatchQueue.global(qos: .userInitiated).async {
-            let result = Stats.compute(buckets: snap.buckets, range: range)
-            Task { @MainActor [weak self] in
+        let layout = self.typingLayout
+        let lettersAndPunctuation = self.lettersAndPunctuation
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let result = Stats.compute(buckets: snap.buckets, range: range, layout: layout,
+                                       lettersAndPunctuation: lettersAndPunctuation)
+            Task { @MainActor in
                 guard let self else { return }
                 self.stats = result
                 self.computing = false
+                if self.refreshPending {
+                    self.refreshPending = false
+                    self.refresh(force: true)
+                }
             }
         }
     }
